@@ -3,6 +3,7 @@
 
 This project demonstrates communication between two STM32 Nucleo boards using UART over RS-485 transcievers. 
 The goal is to transmit live acclerometer data and status messages, visualize them on an LCD screen, and interact using onboard buttons to toggle between modes like Pong and Smiley Face display. 
+The previous project "Electric Tin-can Telephone" was used as foundation for this project. 
 
 ### **Key Features:**
 - **RS-485 UART Communication** : Full-duplex messaging using SN75176A transceivers.
@@ -12,7 +13,7 @@ The goal is to transmit live acclerometer data and status messages, visualize th
 - **Display Mode Toggle:** :Button-triggered switch between smiley orientation and other display modes.
 - **Reliable Data Handling** : Uses circular buffers and interrupts for message integrity.
 
-  ## **System Architecture**
+## **System Architecture**
 
 The system consists of two Nucleo boards:
 1. **Board 1** : Sends live accelerometer data and listens for ACKs or Pong requests.
@@ -88,7 +89,8 @@ void enable_Recieve(int RE,int DE)
 ![image](https://github.com/user-attachments/assets/5c7ff930-c694-4a42-84ff-d7a7650cba36)
 
 *Figure 6: Schematic for the LCD displays*
-** Recieving Board 2: **
+
+**Recieving Board 2:**
 Board 2 uses the ST7735S LCD display to show different visual outputs depending on the current display mode.
 Modes:
 - Text Mode (default mode):
@@ -111,4 +113,91 @@ Modes:
 *Figure 7: Schematic for the Accelerometer*
 
 The BMI160 accelerometer was used to detect motion and orientation by reading the X, Y, and Z-axis acceleration values over I²C communication.
-In order to write to the correct registers for the acceleration values, the datasheet was used.
+In order to write to the correct registers for the acceleration values, the datasheet was consulted.
+
+![image](https://github.com/user-attachments/assets/691689c8-f282-4e49-b3d8-81a13127ab32)
+
+*Figure 8: Page 52 of the BM160 Datasheet showing the relavant registers for accel values*
+
+The accelerometer gives you a 16-bit value, but it can only send 8 bits at a time over I²C.
+So it splits the number into two parts:
+- LSB (Least Significant Byte) – the lower part of the number
+- MSB (Most Significant Byte) – the upper part
+
+The LSB is sent first, because that’s how most microcontrollers expect data, from smallest to largest.
+Later, both parts are combined in code to get the full 16-bit value.
+
+**Mode Switching:**
+A single push button cycles between 3 modes:
+ - 0 (Default text displayed)
+ - 1 (Smiley face tilting)
+ - 2 (Pong game)
+The code uses previousButton and currentButton to detect a new press (not a held button).
+On each press, it changes the mode, clears the screen and loads the next mode.
+
+In Mode 1, the receiver uses the X and Y values sent from the sender board to figure out how the sender is tilted.
+This is done using a threshold value of ±500.
+
+Why 500?
+- The BMI160 accelerometer outputs values from about -16,384 to +16,384 in ±2g mode.
+- We tested different values and found that ±500 was enough to detect a clear tilt without reacting to small shakes or noise.
+- It strikes a balance between sensitivity and stability.
+
+How we used it:
+```c
+if (x_val > threshold) {
+                   next_position = 1;                  //sender board tilted to the right       
+               } else if (x_val < -threshold) {
+                   next_position = 4;                 //sender board tilted to the left
+               } else if (y_val > threshold) {
+                   next_position = 3;                 //sender board tilted to backwards
+               } else if (y_val < -threshold) {
+                   next_position = 2;                 //sender board tilted to the forwards
+               } else {
+                   next_position = 1;                 //default positioning no major tilt
+               }
+```
+These directions were then passed to the `drawSmiley(position)` function to update the orientation of the face.
+
+The `moveGame(accel_x, accel_y)` function creates a live pong game using the X and Y tilt data send from the accelerometer.
+The function does the follwing:
+- Move the paddle using acceleration values
+- Animate the ball across the screen
+- Detect collisions and update score
+- Erase and redraw game elements each frame
+
+The ball moves every 7 times the function is run ( it is running continuously when this mode is active) in order to slow it down. 
+```c
+if (frame_counter >= 7)
+```
+The paddles moves based on how the sender board is tilted (accelerometer).
+```c
+paddle_x = (accel_x + 500) * SCREEN_WIDTH / 1000;
+paddle_y = (accel_y + 500) * SCREEN_HEIGHT / 1000;
+```
+- This takes the X and Y acceleration from the sender board
+- Maps it to a value that fits on the LCD screen
+- So when the board tilts right, the paddle moves right, etc.
+It also makes sure the paddle stays on the screen by checking the edges.
+
+The code then checks if the ball is touching the paddle:
+```c
+if (ball overlaps paddle)
+```
+If true, the ball bounces back upwards and is moved slightly above the paddle so it doesnt stick. 
+The score increases each time the ball hits the top of the screen. If it misses the paddle and hits the bottom of the screen, the score will reset to 0.
+1. The previous score are is cleared:
+```c
+fillRectangle(SCREEN_WIDTH - 40, 0, 40, 10, black);
+```
+2. The updated score is printed using:
+```c
+printText(scoreStr, SCREEN_WIDTH - 30, 0, white, black);
+```
+### **STM32 Microcontrollers**
+![image](https://github.com/user-attachments/assets/42d0791a-0d11-479b-9630-b062ef380005)
+
+*Figure 9: Schematic for STM32 Nucleo Boards*
+
+
+
