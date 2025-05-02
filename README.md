@@ -13,6 +13,13 @@ The previous project "Electric Tin-can Telephone" was used as foundation for thi
 - **Display Mode Toggle:** :Button-triggered switch between smiley orientation and other display modes.
 - **Reliable Data Handling** : Uses circular buffers and interrupts for message integrity.
 
+### **Procedure**
+1. Basic Communication : Started with sending built-in test message `[SENSOR DATA]`, using the '[' and ']' to mark the start and end of each message. Unidirectional communication only.
+2. Full-Duplex Setup: Implemented bidirectional communication so that both boards could transmit and recieve.
+3. Accelerometer Integration: Read X, Y, Z values via I2C and transmitted them as formatted messages.
+4. Display Features: Added LCD modes: smiley face that responds to orientation, and a pong game controlled also by the orientation.
+5. Button Controls: Added buttons for switching display modes and resending messages when ACKs were no recieved.
+
 ## **System Architecture**
 
 The system consists of two Nucleo boards:
@@ -159,12 +166,20 @@ if (x_val > threshold) {
 ```
 These directions were then passed to the `drawSmiley(position)` function to update the orientation of the face.
 
+![IMG_5744](https://github.com/user-attachments/assets/3cf765ee-598c-497c-b1b9-0b9797d05838)
+
+*Figure 9: Smiley face display*
+
 The `moveGame(accel_x, accel_y)` function creates a live pong game using the X and Y tilt data send from the accelerometer.
 The function does the follwing:
 - Move the paddle using acceleration values
 - Animate the ball across the screen
 - Detect collisions and update score
 - Erase and redraw game elements each frame
+
+![IMG_5745](https://github.com/user-attachments/assets/53404640-dfce-4ebb-9d8f-a281ba65985a)
+
+*Figure 10: Ping pong display showing score of 3*
 
 The ball moves every 7 times the function is run ( it is running continuously when this mode is active) in order to slow it down. 
 ```c
@@ -197,7 +212,45 @@ printText(scoreStr, SCREEN_WIDTH - 30, 0, white, black);
 ### **STM32 Microcontrollers**
 ![image](https://github.com/user-attachments/assets/42d0791a-0d11-479b-9630-b062ef380005)
 
-*Figure 9: Schematic for STM32 Nucleo Boards*
+*Figure 11: Schematic for STM32 Nucleo Boards*
 
+The same pins for the LCD displays and the UART serial communication were used in the previous project. Most of the MCUs functionality was explained in previous sections. This section will just provide a brief summary.
 
+**GPIO Pins**
+- TRansciever direction control (RE/DE on PB4/PB5)
+- LCD control pins (CS/DC/RESET)
+- Button Inputs (PB0/PB1)
 
+**USART**
+- USART1: Used for board to board communication.
+- USART2: Connected to the serial monitor (PuTTY)
+
+**SPI**
+  - Used to send data to the LCDs.
+
+**I2C**
+- Used to read the 16-bit acceleration values from the BM160 sensor.
+- Only 8 bits could be read at a time, LSB was read first, then MSB.
+- Data registers like `0x12`, `0x14`, `0x16` were used for X, Y and Z.
+
+**Circular Buffer**
+- A circular buffer structure handled incoming UART messages.
+- Prevented data loss during fast and continuous communication.
+
+**Button Interrupt Setup (EXTI1)
+A hardware interrupt is used on PB1 to toggle between Pong mode and normal transmission mode. 
+- EXTI1 is configured to trigger on a falling edge, which happens when the button is pressed (pin goes low).
+- The SYSCFG register maps the EXTI1 line to port B, pin 1 (PB1).
+- The NVIC enables EXTI1 to trigger the interrupt handler `EXTI1_IRQHandler()`.
+```c
+RCC->APB2ENR |= (1 << 0);     // Enable SYSCFG clock
+SYSCFG->EXTICR[0] |= (1 << 4); // Map EXTI1 to PB1
+EXTI->IMR1 |= (1 << 1);       // Unmask EXTI1
+EXTI->FTSR1 |= (1 << 1);      // Trigger on falling edge
+NVIC->ISER[0] |= (1 << 7);    // Enable EXTI1 interrupt in NVIC
+```
+What does the interrupt do?
+- Toggles the `pongMode` flag
+- Sends a message to the reciever:
+  - `[PONG` = Enter pong mode (reciever disbales ACKs to improve the real time speed)
+  - `[EXIT]` = Exits pong mode (reciever resumes ACKs)
