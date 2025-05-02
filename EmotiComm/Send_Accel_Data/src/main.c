@@ -1,10 +1,32 @@
-/* Sender Code for bidirectional transceiver functionality between two boards
-involves : 
-Reading accelerometer values
-switching between sending and recieving mode for bidirectional transceiver
-push button added to manually send sensor values if ack has not been recieved
-- interupt added to detect push button to switch to pong mode
-Pong mode that only sends and doesn't recieve to allow faster communication between both boards when playing pong
+/* 
+Project : EMOTICOMM - SENSOR DATA SENDER BOARD 
+Jennifer O'reilly - C21475355, Claire Murphy - C21337056 , 
+Last Updated : 30/04/2025
+
+- This code runs on the sending STM32 Nucleo L432KC board in a bidirectional embedded system
+ communication setup. 
+- The board continuously reads X, Y, and Z accelerometer data using I2C and transmits this data 
+  to a paired receiver board over UART (USART1).
+- Each data packet is formatted with square bracket delimiters ('[' and ']') for reliable parsing.
+- After sending a message, the board waits for an [Ack] response from the receiver to validate
+  correct switching of transceiver direction 
+- If no acknowledgement is received, the user can press a physical button to manually resend the message.
+- The board supports a "Pong Mode," toggled by an interrupt-driven button. In Pong Mode : 
+    - "PONG" message is sent to reciever board to tell it to stop sending acks
+    - accelerometer values are sent in a loop to enable paddle control on the receiving board.
+    - sender stops waiting for acknowledgements during Pong Mode to allow real-time motion input.
+    - "EXIT" message is sent to reciver baord to exit pong mode when button is pressed
+- USART2 is used to output debug and validation messages to a serial monitor.
+- LCD output provides visual feedback for Ack reciever verification and pong mode verification.
+
+Core components include:
+- I2C interface for reading accelerometer data
+- USART1 for board-to-board UART communication
+- USART2 for serial debugging
+- GPIO control of a bidirectional transceiver (RE/DE pins)
+- Interrupt-driven button handling for mode switching
+- LCD feedback display via SPI
+- Circular buffer and message parsing with acknowledgment logic
 */
 
 //include necessary header files
@@ -16,9 +38,9 @@ Pong mode that only sends and doesn't recieve to allow faster communication betw
 #include "display.h"
 #include "biDirectional_Trans.h"
 #include <string.h>
-#include "i2c.h"
-#include "spi.h"      // For SPI communication with LCD
-#include "display.h"  // For LCD drawing functions like printText()
+#include "i2c.h"         //For reading accelerometer data 
+#include "spi.h"        // For SPI communication with LCD
+#include "display.h"   // For LCD drawing functions like printText()
 
 
                                                   //assembly instruction functions embedded with c to enable/disable interrupts
@@ -35,7 +57,6 @@ void setup(void);
 void delay_ms(volatile uint32_t dly);
 void initSerial(uint32_t baudrate);
 void eputc(char c);
-void readInputMessage();
 void shiftdisp(int i,const char *message);
 void sendMessage();
 void clearMessage(char *buffer, int size);
@@ -76,33 +97,23 @@ int main()
     char message_received[CIRC_BUF_SIZE];      //stores recieved message from circular buffer
     int currentButton = 0;
     int previousButton = 0;
-    int currentButton2 = 0;
-    int previousButton2 = 0;
-    int buttonCount = 0;
     setup();  
-    initI2C();
-    ResetI2C(); 
+    initI2C();         //setup i2c peripheral
+    ResetI2C();      
     // Take accelerometer out of power-down mode
     I2CStart(0x69, WRITE, 2);
     I2CWrite(0x7E);   
-    I2CWrite(0x11);      // Normal mode
+    I2CWrite(0x11);         // Normal mode
     I2CStop();
-    delay_ms(1000000);   // Wait for startup                    
+    delay_ms(1000000);     // Wait for startup                    
     init_display();
     init_circ_buf(&rx_buf);
     NVIC->ISER[1] |= (1 << (37-32));        //ensures that the USART1_IRQHandler() gets triggered when data is received via UART2
     enable_interrupts();
     while(1)
     {
-   
-    //**if not working move this before pong mode**
-    measureAccel();
-    sendMessage();
-    enable_Recieve(4,5);
-    ack_recieved = 0;
-    printf("waiting for ack.....");
 
-     //pong mode determine by push button detected by interupt
+    //pong mode is determined by push button detected by interupt
     if (pongMode == 1)
    {
         //pong mode set up
@@ -123,6 +134,12 @@ int main()
         printMessage(0,"EXITING PONG MODE");
         
     }
+        //Outside of pong mode, operation involves measuring accel data,sending accel data, waiting for ack, repeating when ack is recieved
+        measureAccel();
+        sendMessage();
+        enable_Recieve(4,5);
+        ack_recieved = 0;
+        printf("waiting for ack.....");
 
     //loop used while waiting for ack to be recieved from other board
         while(ack_recieved == 0)
@@ -141,29 +158,27 @@ int main()
            printf("Message received from USART1: %s\n", message_received);      //print to serial monitor (usart2) 
           //  printf("\rReceived message: %s\r\n", message_received);
 
+
+          //if message recieved from recieving board is an Ack message
             if (strcmp(message_received, "Ack") == 0)
             {
-                printf("ACK RECIEVED\r\n");
-                ack_recieved = 1;  
-            
-            // add led implementation at end
-            // GPIOB->ODR |= (1 << 4);                                             //Turn LED on
+                printf("ACK RECIEVED\r\n");  
+                ack_recieved = 1;              //set ack_recieved flag to allow sensor data to be read and sent again
+
             delay_ms(5000000);                                                 
-        
-            // GPIOB->ODR &= ~(1 << 4);                                           //Turn LED off
-            printMessage(1,message_received);                                 //call printMessage funtion to print to LCD
+            printMessage(1,message_received);                        //call printMessage funtion to print to LCD
             clearMessage(message_received, CIRC_BUF_SIZE);          //After message has been recieved, call function to clear message recieved function
-            data_ready = 0; 
+            data_ready = 0;                                        //reset data_ready flag to zero
             }
-                                            //reset data flag to zero
+                                         
         }
-    //Check if button is pressed 
+    //Check if button 1 is pressed - This button is responsable for manually sending messages after ack has not been recieved 
         currentButton = buttonpressed(0);
         if (previousButton == 0 && currentButton == 1)
         {
             //when button is pressed, the ack_recieved variable becomes one which allows the board to send on more data manually
             printf("Ack not recieved, resending message...\r\n");
-            ack_recieved = 1;
+            ack_recieved = 1; 
             }
             previousButton = currentButton;
         }
@@ -179,26 +194,23 @@ void setup()
 {
     initClocks();    
     RCC->AHB2ENR |= (1 << 0) + (1 << 1);     // enable GPIOA and GPIOB
-    //Changing led functionality pins to pins to control chip comms settings
     pinMode(GPIOB,4,1);                     //Set pin B4 to 1 -ouput pin for RE
     pinMode(GPIOB,5,1);                    //Set pin pB5 to 1 - output pin for DE
-   //addition of two buttons in PB1 and PB0
-    pinMode(GPIOB,0,0);
-    pinMode(GPIOB,1,0);
-    enablePullUp(GPIOB,1);
-    enablePullUp(GPIOB,0);
+    pinMode(GPIOB,0,0);                   //Set pin PB0 to 0 - input for push button 
+    pinMode(GPIOB,1,0);                  //Set pin PB1 to 0 - inpit for push button
+    enablePullUp(GPIOB,1);              //enable internal pull-up resistors for PB1
+    enablePullUp(GPIOB,0);             //enable internal pull-up resistors for PB0
     initSerial(9600);
-    
-   
-    //set up code added for button interupt - need to look into
     enable_Transmit(4,5);
-    RCC->APB2ENR |= (1 << 0);    // Enable SYSCFG clock
-    SYSCFG->EXTICR[0] &= ~(0xF << 4); // clear EXTI1 bits
-    SYSCFG->EXTICR[0] |= (1 << 4);    // Map EXTI1 to Port B (PB1)
-    EXTI->IMR1 |= (1 << 1);    // Unmask EXTI1
-    EXTI->FTSR1 |= (1 << 1);   // Falling edge trigger (button press = low)
-    EXTI->RTSR1 &= ~(1 << 1);  // No rising edge trigger
-    NVIC->ISER[0] |= (1 << 7); // Enable EXTI1 IRQ (EXTI1_IRQn = interrupt 7)
+
+    //interupt setup for push button
+    RCC->APB2ENR |= (1 << 0);               // Enable SYSCFG clock
+    SYSCFG->EXTICR[0] &= ~(0xF << 4);      // clear EXTI1 bits
+    SYSCFG->EXTICR[0] |= (1 << 4);        // Map EXTI1 to PB1
+    EXTI->IMR1 |= (1 << 1);              // Unmask EXTI1
+    EXTI->FTSR1 |= (1 << 1);            // Falling edge trigger (button press = low)
+    EXTI->RTSR1 &= ~(1 << 1);          // No rising edge trigger
+    NVIC->ISER[0] |= (1 << 7);        // Enable EXTI1 IRQ (EXTI1_IRQn = interrupt 7)
 
     
 }
@@ -264,8 +276,10 @@ void eputc(char c)
 } 
 
 
+
 void sendMessage()
 {
+    //function used to send accelerometer data to recieiving board via usart1
   
     char msg[48];
     snprintf(msg, sizeof(msg), "X=%d,Y=%d,Z=%d", X_g, Y_g, Z_g);  // live accel values
@@ -275,21 +289,21 @@ void sendMessage()
     while (!(USART1->ISR & (1 << 6)));  // Wait until TXE = 1
     USART1->TDR = '[';
     //printf("Sent: [\r\n");
-    delay(10000);
+    delay(1000);
 
     // Send message contents
     for (int i = 0; msg[i] != '\0'; i++) {
         while (!(USART1->ISR & (1 << 6)));  // Wait until TXE = 1
         USART1->TDR = msg[i];
-        delay(100000);
-          printf("Sent: %c\r\n", msg[i]);     // Debug: print each character
-      //  delay_ms(5);                  // Optional: adjust or remove for smoother sending
+        delay(1000);
+        //  printf("Sent: %c\r\n", msg[i]);     // Debug: print each character
+  
     }
-    delay(10000);
+
     // Send closing bracket
     while (!(USART1->ISR & (1 << 6)));
     USART1->TDR = ']';
-  //  printf("Sent: ]\r\n");
+  // printf("Sent: ]\r\n");
   delay(1000);
 
     while (!(USART1->ISR & (1 << 7)));      // Wait until TC = 1 (all sent)
@@ -456,33 +470,33 @@ int buttonpressed(int buttonpin)
 void measureAccel() {
          //X VALUE
          printf("Reading X axis...\n");
-         GPIOB->ODR |= (1 << 3);	// set port bit for logic analyser debug
-         I2CStart(0x69,WRITE,1); // Write the address of the 
-         I2CWrite(0x12);      	// register we want to talk to
-         I2CReStart(0x69,READ,2);// Switch to read mode and request 2 bytes
-         response=I2CRead();		// read low byte
+         GPIOB->ODR |= (1 << 3);	                   // set port bit for logic analyser debug
+         I2CStart(0x69,WRITE,1);                      // Write the address of the 
+         I2CWrite(0x12);                           	// register we want to talk to
+         I2CReStart(0x69,READ,2);                  // Switch to read mode and request 2 bytes
+         response=I2CRead();		              // read low byte
          x_accel=response;  	    
-         response=I2CRead();		// read high byte
-         x_accel=x_accel+(response << 8); // combine bytes
+         response=I2CRead();		            // read high byte
+         x_accel=x_accel+(response << 8);      // combine bytes
  
          //Y VALUE
          printf("Reading Y axis...\n");
-         I2CStart(0x69,WRITE,1); // Write the address of the 
-         I2CWrite(0x14);      	// register we want to talk to
-         I2CReStart(0x69,READ,2);// Switch to read mode and request 2 bytes
-         response=I2CRead();		// read low byte
+         I2CStart(0x69,WRITE,1);                // Write the address of the 
+         I2CWrite(0x14);      	               // register we want to talk to
+         I2CReStart(0x69,READ,2);             // Switch to read mode and request 2 bytes
+         response=I2CRead();		         // read low byte
          y_accel=response;  	
-         response=I2CRead();		// read high byte
+         response=I2CRead();		       // read high byte
          y_accel=y_accel+(response << 8); // combine bytes
  
          //Z VALUE
          printf("Reading Z axis...\n");
-         I2CStart(0x69,WRITE,1); // Write the address of the 
-         I2CWrite(0x16);      	// register we want to talk to
-         I2CReStart(0x69,READ,2);// Switch to read mode and request 2 bytes
-         response=I2CRead();		// read low byte
+         I2CStart(0x69,WRITE,1);              // Write the address of the 
+         I2CWrite(0x16);      	             // register we want to talk to
+         I2CReStart(0x69,READ,2);           // Switch to read mode and request 2 bytes
+         response=I2CRead();		       // read low byte
          z_accel=response;  	
-         response=I2CRead();		// read high byte
+         response=I2CRead();		      // read high byte
          z_accel=z_accel+(response << 8); // combine bytes
  
         
@@ -490,45 +504,36 @@ void measureAccel() {
  
  
          // end the tranmission and convert values, then print all 3
-         I2CStop();	// end I2C transaction
-         GPIOB->ODR &= ~(1 << 3); // clear port bit for logic analyser debug
-         X_g = x_accel;	// promote to 32 bits and preserve sign
-         X_g=(X_g*981)/16384; // assuming +1g ->16384 (+/-2g range)
-         Y_g = y_accel;	// promote to 32 bits and preserve sign
-         Y_g=(Y_g*981)/16384; // assuming +1g ->16384 (+/-2g range)
-         Z_g = z_accel;	// promote to 32 bits and preserve sign
-         Z_g=(Z_g*981)/16384; // assuming +1g ->16384 (+/-2g range)
+         I2CStop();	                               // end I2C transaction
+         GPIOB->ODR &= ~(1 << 3);                 // clear port bit for logic analyser debug
+         X_g = x_accel;	                         // promote to 32 bits and preserve sign
+         X_g=(X_g*981)/16384;                   // assuming +1g ->16384 (+/-2g range)
+         Y_g = y_accel;	                       // promote to 32 bits and preserve sign
+         Y_g=(Y_g*981)/16384;                 // assuming +1g ->16384 (+/-2g range)
+         Z_g = z_accel;	                     // promote to 32 bits and preserve sign
+         Z_g=(Z_g*981)/16384;               // assuming +1g ->16384 (+/-2g range)
          
-                             //uncomment readinput message code for Jen
-                             //function constanlty checking serial monitor for user input
-                              //Input message flag is controlled in readInputMessage function
+    
      enable_Transmit(4,5);   
      delay_ms(10000);
-     //printf("Press the button to send data...\r\n");
-     // Wait for button press
-     //while ((GPIOB->IDR & (1 << 0)) != 0);  // Button not pressed (active-low)
      delay_ms(100000);  // Debounce delay
 }
-void EXTI1_IRQHandler(void)
+void EXTI1_IRQHandler(void) //interrupt function for button
 {
-
-    delay_ms(50000);  // Simple debounce
-    if (EXTI->PR1 & (1 << 1))  // Check if EXTI1 triggered
+    if (EXTI->PR1 & (1 << 1))  // Check if EXTI line 1 triggered
     {
-        
-        EXTI->PR1 = (1 << 1);  // Clear the interrupt pending flag
+        EXTI->PR1 = (1 << 1);  // Clear the interrupt pending flag for EXTI1
 
-        // Action on button press:
         ack_recieved = 1;
         if (pongMode == 1)
         {
-            pongMode = 0;
-            enable_Transmit(4,5); 
-            sendPongMessage(pongMode);
+            pongMode = 0;                   //disable pong mode
+            enable_Transmit(4,5);          //set transceiver to transmit mode
+            sendPongMessage(pongMode);    //Notify recieving board to resume sending response ACKs
         }
         else if(pongMode == 0)
         {
-        pongMode = 1;          // Set Pong Mode ON
+        pongMode = 1;          // Enable Pong mode
         }
         printf("Button Interrupt...\r\n");
     }
@@ -547,11 +552,11 @@ void sendPongMessage(int pongmode)
     msg = "  [PONG]";
     }
  
-    else if(pongmode == 0)
+    else
     {
     msg = "  [EXIT]";
     }
-    //delay(100000);
+
     for (int i = 0; msg[i] != '\0'; i++) {
         while (!(USART1->ISR & (1 << 6)));  // Wait until TXE = 1
         USART1->TDR = msg[i];
