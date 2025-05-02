@@ -254,3 +254,40 @@ What does the interrupt do?
 - Sends a message to the reciever:
   - `[PONG` = Enter pong mode (reciever disbales ACKs to improve the real time speed)
   - `[EXIT]` = Exits pong mode (reciever resumes ACKs)
+ 
+## **Debugging**
+To verify reliable communication between the two boards, PulseView was used with a logic analyzer to monitor UART transmissions and debug system behavior.
+
+The following observations were made:
+![image](https://github.com/user-attachments/assets/278e55d0-3cd4-4f80-9b58-eb8012481d98)
+
+*Figure 12: Sending sensor values from board 1*
+
+![image](https://github.com/user-attachments/assets/817c357b-599a-4e78-9434-56c7c5f5b4ef)
+
+*Figure 13: Sending ACK from board 2* 
+
+![image](https://github.com/user-attachments/assets/93c074cb-6e05-45b5-9786-08a9cc18f076)
+
+*Figure 14: Sending sensor values after the ACK* 
+
+![image](https://github.com/user-attachments/assets/c8c7d590-12e0-48a5-8492-4ae42bcf8c10)
+
+*Figure 15: Pong mode is shown in the middle. It exits and enters pong mode.* 
+
+![image](https://github.com/user-attachments/assets/97f90c83-3daa-457d-834f-eb978c57b3ca)
+
+*Figure 16: Zoomed in view of [PONG] message being sent*
+
+![image](https://github.com/user-attachments/assets/b6178a19-86f3-44c3-811a-39486e93b38e)
+
+*Figure 17: Now the pong message is followed by continous sensor values with no ACKs*
+
+![image](https://github.com/user-attachments/assets/6a03fa5f-c2e2-49ea-8bb7-de816582fb26)
+
+*Figure 18: The [EXIT] message*
+
+![image](https://github.com/user-attachments/assets/099059b7-4e8a-4fe2-8ecc-a0e52a74c293)
+
+*Figure 19: The [EXIT] message followed by ACKs as it has left pong mode.*
+
