@@ -13,7 +13,7 @@ The previous project "Electric Tin-can Telephone" was used as foundation for thi
 - **Display Mode Toggle:** :Button-triggered switch between smiley orientation and other display modes.
 - **Reliable Data Handling** : Uses circular buffers and interrupts for message integrity.
 
-### **Procedure**
+### **Log of Progress:**
 1. Basic Communication : Started with sending built-in test message `[SENSOR DATA]`, using the '[' and ']' to mark the start and end of each message. Unidirectional communication only.
 2. Full-Duplex Setup: Implemented bidirectional communication so that both boards could transmit and recieve.
 3. Accelerometer Integration: Read X, Y, Z values via I2C and transmitted them as formatted messages.
@@ -291,3 +291,35 @@ The following observations were made:
 
 *Figure 19: The [EXIT] message followed by ACKs as it has left pong mode.*
 
+These PulseView captures show everything working as expected. In Figure 12, board 1 sends sensor values and board 2 replies with an ACK (Figure 13). 
+After that, board 1 sends the next set of sensor data (Figure 14). 
+The pong mode then kicks in (Figure 15), and Figure 16 zooms in on the actual "[PONG]" message being sent. 
+In Figure 17, the ACKs stop during pong mode, which is exactly what we wanted, continuous data with no handshakes. 
+When we send "[EXIT]" in Figures 18 and 19, ACKs start up again, showing the system exited pong mode properly. 
+
+
+## Conclusion
+The project successfully created two-way communication between STM32 boards using UART and interrupts. Live accelerometer data was sent from one board, parsed on the other, and used to display a smiley face that rotated with orientation, as well as a pong game. ACKs were used to confirm messages were received properly and display the bidirectional capabilities of the transcievers.
+
+PulseView helped verify that messages and acknowledgments were sent and received as expected. Timers weren’t needed because the system reacted to events (like button presses and incoming messages) instead of relying on fixed timing, keeping the design simple and reliable.
+
+
+
+## References
+1. **STM32 Reference Manual**  
+    c:\Users\jenni\Downloads\stm32l432_reference_manual.pdf
+
+2. **STM32 Data Sheet**  
+   c:\Users\jenni\Downloads\stm32l432kc_datasheet.pdf
+
+3. **ST7735S Data Sheet**
+    (../../../../../../../Downloads/ST7735S.pdf)
+
+4. **Lecturer's GitHub Repository**  
+    https://github.com/f3dtud/EENG1030
+5. **SN75176A Differential Bus Transceiver Datasheet**
+
+   file:///C:/Users/jenni/OneDrive%20-%20Technological%20University%20Dublin/4th%20Year/Semester%202/Embedded%20Systems/Project2/Shared/Extra%20files/sn75176a.pdf
+
+6. **BMI160 Datasheet**
+   https://brightspace.tudublin.ie/d2l/le/content/384173/viewContent/3383087/View
