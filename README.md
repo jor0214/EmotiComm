@@ -6,7 +6,7 @@ The goal is to transmit live acclerometer data and status messages, visualize th
 The previous project "Electric Tin-can Telephone" was used as foundation for this project. 
 
 ### **Key Features:**
-- **RS-485 UART Communication** : Full-duplex messaging using SN75176A transceivers.
+- **RS-485 UART Communication** : Half-duplex bidirectional messaging using SN75176A transceivers.
 - **Accelerometer Input**: Reads real-time X, Y, Z data from a BMI160 sensor via I²C.
 - **Dynamic Display** : LCD shows live data and graphical feedback.
 - **Pong Mode** : Rapid data sending with no ACK wait, triggered by a button press.
